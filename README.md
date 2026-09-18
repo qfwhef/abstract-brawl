@@ -8,7 +8,7 @@
 
 by bilibili：[Xz乔希](https://space.bilibili.com/5859321)
 
-[在线游玩](https://abfighters.pages.dev/) · [玩法与设计](docs/DESIGN.md) · [开发指南](docs/DEVELOPMENT.md) · [贡献说明](CONTRIBUTING.md)
+[在线游玩](https://abfighters.pages.dev/) · [玩法与设计](docs/DESIGN.md) · [开发指南](docs/DEVELOPMENT.md) · [贡献说明](CONTRIBUTING.md) · [在线对战规范](docs/ONLINE.md) · [问题排查与技术交接手册](docs/TROUBLESHOOTING.md)
 
 ## 包含什么
 
