@@ -13,5 +13,8 @@
     "test": "node scripts/test.mjs",
     "build": "node scripts/build.mjs",
     "pack": "node scripts/release.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
   }
 }

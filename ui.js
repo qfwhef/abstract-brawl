@@ -206,23 +206,34 @@ function initNetClient(){
  netClient.on('fight_start',msg=>{
   startOnlineBattle(msg);
  });
- netClient.on('fight_remote_input',msg=>{
-  if(currentGame)currentGame.applyRemoteInput(msg.side,msg.mask);
- });
+  netClient.on('fight_remote_input',msg=>{
+   if(currentGame)currentGame.applyRemoteInput(msg.side,msg.mask,msg);
+  });
  netClient.on('fight_sync',msg=>{
   if(currentGame)currentGame.applySyncSnapshot(msg);
  });
- netClient.on('rematch_ready',msg=>{
-  if(msg.side!==onlineState.mySide)showBanner('对手已准备再战','点击「再来一局」即可重开');
- });
- netClient.on('rematch',()=>{
-  onlineState.locked=[false,false];updateLockBadges();goBack();refresh();
- });
+  netClient.on('fight_result',msg=>{
+   if(currentGame&&currentGame.phase!=='finished'){
+    const winnerSide=msg.winner!=null?msg.winner:(currentGame.wins[0]>=2?0:1);
+    const winner=currentGame.fighters[winnerSide]||currentGame.fighters[0];
+    currentGame.phase='finished';
+    currentGame.options.onEnd?.(winner,`${currentGame.wins[0]} : ${currentGame.wins[1]}`);
+   }
+  });
+  netClient.on('rematch_ready',msg=>{
+   if(msg.side!==onlineState.mySide)showBanner('对手已准备再战','点击「再来一局」即可重开');
+  });
+  netClient.on('rematch',()=>{
+   onlineState.locked=[false,false];updateLockBadges();goBack(false);refresh();
+  });
+  netClient.on('fight_reselect',()=>{
+   onlineState.locked=[false,false];updateLockBadges();goBack(false);refresh();
+  });
  netClient.on('opponent_left',()=>{
   if(onlineState.inRoom){
    if(currentGame&&!$('battle').hidden){
     showBanner('对手已退出对决','比赛结束');
-    setTimeout(()=>{goBack();updateRoomViewUI();},2000);
+    setTimeout(()=>{goBack(false);updateRoomViewUI();},2000);
    }else{
     onlineState.playerNames[1]='等待加入...';
     onlineState.locked=[false,false];
@@ -233,7 +244,7 @@ function initNetClient(){
  });
  netClient.on('room_closed',()=>{
   onlineState.inRoom=false;
-  if(!$('battle').hidden)goBack();
+  if(!$('battle').hidden)goBack(false);
   $('online-lobby').hidden=false;
   $('online-room-view').hidden=true;
   refreshRoomList();
@@ -429,7 +440,7 @@ async function startOnlineBattle(msg){
    images,animationSheets,animations:window.ANIMATIONS,memeVisuals:window.MemeVisuals,audio:audioFX,prepareSkill,
    onRoundReset:g=>touchInput.reapply(g),
    onPause:paused=>{$('pause').textContent=paused?'继续 ESC':'暂停 ESC';},
-   onLocalInput:(mask,age)=>netClient?.sendFightInput(mask,age),
+   onLocalInput:(mask,age,state)=>netClient?.sendFightInput(mask,age,state),
    onSyncSnapshot:snap=>netClient?.sendFightSync(snap),
    onHUD:updateHUD,onBanner:showBanner,
    onEnd:(winner,stats)=>{
@@ -505,7 +516,7 @@ function updateHUD(g){
 }
 function showBanner(title,sub=''){$('banner-text').textContent=title;$('banner-sub').textContent=sub;}
 function showEnd(winner,stats){$('end').hidden=false;$('end-sub').textContent='MATCH COMPLETE';$('end-title').textContent=(currentGame?.isTeamMatch?currentGame.teamTitle(winner.team):winner.data.name)+' 获胜';$('end-info').textContent=stats;showBanner('');}
-function goBack(){
+function goBack(notifyPeer=true){
  $('selection').inert=false;startTicket++;starting=false;$('rematch').disabled=false;$('start').disabled=false;$('quick-start').disabled=false;$('start').innerHTML='准备好了，开打！ <span>↗</span>';
  if(currentGame){currentGame.destroy();currentGame=null;}
  $('battle').hidden=true;$('selection').hidden=false;document.body.classList.remove('in-battle');
@@ -513,11 +524,11 @@ function goBack(){
  if(mode==='online'){
   onlineState.locked=[false,false];
   updateLockBadges();
-  netClient?.sendFightReselect();
+  if(notifyPeer&&onlineState.inRoom)netClient?.sendFightReselect();
  }
  refresh();refreshStage();
 }
-$('start').onclick=startGame;$('quick-start').onclick=startGame;$('back').onclick=goBack;$('reselect').onclick=goBack;
+$('start').onclick=startGame;$('quick-start').onclick=startGame;$('back').onclick=()=>goBack();$('reselect').onclick=()=>goBack();
 $('rematch').onclick=()=>{
  if(mode==='online'){
   netClient?.sendFightRematch();

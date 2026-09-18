@@ -1,6 +1,6 @@
 # 开发指南
 
-项目是无运行依赖的静态网页。根目录 `index.html` 是模式选择页，三个模式分别由各自 HTML 按顺序加载传统脚本。部分对象通过 `window` 共享，因此调整脚本顺序前应检查依赖。
+游戏前端是静态网页，格斗与回合战的在线模式另需 Node.js WebSocket 服务，服务端依赖 `ws`。根目录 `index.html` 是模式选择页，三个模式分别由各自 HTML 按顺序加载传统脚本。部分对象通过 `window` 共享，因此调整脚本顺序前应检查依赖。
 
 ## 从哪里修改
 
@@ -11,6 +11,8 @@
 | 格斗规则、碰撞、2V2 | `engine.js`、`meme-combat.js` |
 | 格斗技能道具与表现 | `meme-art.js`、`meme-visuals.js` |
 | 格斗界面和输入 | `ui.js`、`style.css`、`touch-input.js`、`touch-guard.js` |
+| 联机客户端、房间协议与服务端 | `net-client.js`、`server/net-server.mjs` |
+| 生产网页与 WebSocket 服务入口 | `server/static-server.mjs` |
 | 回合战规则、角色、招式 | `turn-engine.js`、`turn-data.js`、`turn-cast.js` |
 | 回合战四格布阵 | `turn-formation.js` |
 | 回合战画面与界面 | `turn-renderer.js`、`turn-ui.js`、`turn.css` |
@@ -39,8 +41,8 @@
 
 ## 本地和打包
 
-`npm run dev` 只监听本机 `127.0.0.1`，默认端口 3100，可用 `npm run dev -- --port 3200` 换端口。不会自动暴露给局域网或互联网。
+首次运行先执行 `npm ci` 安装锁定的依赖。`npm run dev` 同时提供静态页面和 `/ws` 联机服务，只监听本机 `127.0.0.1`，默认端口 3100，可用 `npm run dev -- --port 3200` 换端口。不会自动暴露给局域网或互联网。生产环境入口为 `node server/static-server.mjs`，部署方式见 [ONLINE.md](ONLINE.md)。
 
-`npm run build` 按明确的文件类型与运行资源目录生成 `dist/`，复制许可与素材说明。开发脚本、测试、Git 历史和环境文件不会进入网页包。`npm run pack` 在此基础上生成 ZIP 与校验文件；支持的文件大小和总包体须小于标准 ZIP 的 4 GiB 限制。
+`npm run build` 按明确的文件类型与运行资源目录生成 `dist/`，复制许可与素材说明。服务端、开发脚本、测试、Git 历史和环境文件不会进入网页包；在线对战需另行运行配套 Node.js 服务。`npm run pack` 在此基础上生成 ZIP 与校验文件；支持的文件大小和总包体须小于标准 ZIP 的 4 GiB 限制。
 
 常用自走棋说明见 [DESIGN.md](DESIGN.md) 与 [BALANCE.md](BALANCE.md)。修改逻辑后，先运行已有测试；只有新行为需要时再扩充对应测试。

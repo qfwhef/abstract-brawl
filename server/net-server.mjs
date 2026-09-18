@@ -448,19 +448,25 @@ class RoomServer {
     if (!room || room.game !== 'fight' || room.phase !== 'battle') return;
     const mask = Number(msg.mask) | 0;
     const tick = Number(msg.tick) | 0;
-    room.broadcast({
+    const out = {
       type: 'fight_remote_input',
       side: client.side,
       mask,
       tick
-    }, client.id);
+    };
+    if (typeof msg.x === 'number') out.x = msg.x;
+    if (typeof msg.y === 'number') out.y = msg.y;
+    if (typeof msg.vx === 'number') out.vx = msg.vx;
+    if (typeof msg.vy === 'number') out.vy = msg.vy;
+    if (typeof msg.facing === 'number') out.facing = msg.facing;
+    room.broadcast(out, client.id);
   }
 
   handleFightSync(client, msg) {
     const room = client.room;
     if (!room || room.game !== 'fight' || room.phase !== 'battle') return;
     if (client.side !== 0) return;
-    room.broadcast({
+    const out = {
       type: 'fight_sync',
       hp0: msg.hp0,
       hp1: msg.hp1,
@@ -471,7 +477,11 @@ class RoomServer {
       timer: msg.timer,
       round: msg.round,
       wins: msg.wins
-    }, client.id);
+    };
+    for (const key of ['x0', 'y0', 'vx0', 'vy0', 'facing0', 'x1', 'y1', 'vx1', 'vy1', 'facing1', 'winnerTeam', 'phase']) {
+      if (msg[key] !== undefined) out[key] = msg[key];
+    }
+    room.broadcast(out, client.id);
   }
 
   handleFightEnd(client, msg) {
@@ -489,7 +499,7 @@ class RoomServer {
     room.phase = 'select';
     room.fightLocked = [false, false];
     room.rematch = [false, false];
-    room.broadcast({ type: 'rematch', game: 'fight' });
+    room.broadcast({ type: 'fight_reselect' });
   }
 
   handleFightRematch(client) {
@@ -540,6 +550,7 @@ class RoomServer {
       room.rematch = [false, false];
       room.teams = [null, null];
       room.fightChars[1] = null;
+      room.token1 = null;
       room.battle = null;
       room.actionLog = [];
       other.send({ type: 'opponent_left' });

@@ -91,7 +91,7 @@ class NetClient{
  sendFightStage(stage){return this.send({type:'fight_stage',stage});}
  sendFightLock(locked=true,stage=null){return this.send({type:'fight_lock',locked:!!locked,stage});}
  sendFightStart(stage,seed){return this.send({type:'fight_start',stage,seed});}
- sendFightInput(mask,tick){return this.send({type:'fight_input',mask,tick});}
+ sendFightInput(mask,tick,state){return this.send({type:'fight_input',mask,tick,...(state||{})});}
  sendFightSync(data){return this.send({type:'fight_sync',...data});}
  sendFightEnd(winner=null){return this.send({type:'fight_end',winner});}
  sendFightReselect(){return this.send({type:'fight_reselect'});}
