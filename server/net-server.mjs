@@ -51,11 +51,19 @@ class Client {
 }
 
 class Room {
-  constructor(id) {
+  constructor(id, options = {}) {
     this.id = id;
+    this.game = options.game || 'turn'; // 'turn' | 'fight'
+    this.isPublic = options.isPublic !== false; // boolean, default true
+    this.title = (typeof options.title === 'string' && options.title.trim())
+      ? options.title.trim().slice(0, 20)
+      : (this.game === 'fight' ? '格斗擂台' : '回合对战');
+    this.mode = options.mode || '1v1';
     this.phase = 'waiting'; // waiting | select | battle | finished
     this.clients = [null, null]; // [side0=host, side1]
     this.teams = [null, null];
+    this.fightChars = [null, null]; // [charId0, charId1]
+    this.fightLocked = [false, false]; // [locked0, locked1]
     this.seed = null;
     this.battle = null;
     this.actionLog = []; // executed {turn, slot, target} in order
@@ -148,33 +156,87 @@ class RoomServer {
       client.send({ type: 'welcome', id: client.id, token: client.token, protocol: PROTOCOL_VERSION });
       return;
     }
-    // create/join are exactly for getting into a room; everything else requires one
-    if (msg.type !== 'create' && msg.type !== 'join' && !client.room) { client.sendError('NOT_IN_ROOM', '尚未加入房间。'); return; }
+    // create/join/get_rooms do not require an active room; everything else requires one
+    if (msg.type !== 'create' && msg.type !== 'join' && msg.type !== 'get_rooms' && !client.room) {
+      client.sendError('NOT_IN_ROOM', '尚未加入房间。');
+      return;
+    }
     const room = client.room;
     room?.touch();
     switch (msg.type) {
-      case 'create': this.handleCreate(client); break;
+      case 'get_rooms': this.handleGetRooms(client, msg); break;
+      case 'create': this.handleCreate(client, msg); break;
       case 'join': this.handleJoin(client, msg); break;
       case 'lock': this.handleLock(client, msg); break;
       case 'action': this.handleAction(client, msg); break;
       case 'hash': this.handleHash(client, msg); break;
-      case 'rematch': this.handleRematch(client); break;
+      case 'rematch':
+        if (room?.game === 'fight') this.handleFightRematch(client);
+        else this.handleRematch(client);
+        break;
       case 'leave': this.leaveRoom(client, true); break;
+      case 'fight_select': this.handleFightSelect(client, msg); break;
+      case 'fight_stage': this.handleFightStage(client, msg); break;
+      case 'fight_lock': this.handleFightLock(client, msg); break;
+      case 'fight_start': this.handleFightStart(client, msg); break;
+      case 'fight_input': this.handleFightInput(client, msg); break;
+      case 'fight_sync': this.handleFightSync(client, msg); break;
+      case 'fight_end': this.handleFightEnd(client, msg); break;
+      case 'fight_reselect': this.handleFightReselect(client, msg); break;
+      case 'fight_rematch': this.handleFightRematch(client); break;
       default: client.sendError('BAD_MESSAGE', '未知消息类型。');
     }
   }
 
   /* --- room lifecycle --- */
 
-  handleCreate(client) {
+  handleGetRooms(client, msg = {}) {
+    const game = msg.game || 'fight';
+    const list = [];
+    for (const r of this.rooms.values()) {
+      if (r.game === game && r.isPublic) {
+        list.push({
+          code: r.id,
+          title: r.title,
+          host: r.clients[0]?.name || '房主',
+          mode: r.mode,
+          game: r.game,
+          phase: r.phase,
+          full: r.full(),
+          count: r.clients.filter(Boolean).length,
+          created: r.created
+        });
+      }
+    }
+    list.sort((a, b) => b.created - a.created);
+    client.send({ type: 'room_list', game, rooms: list });
+  }
+
+  handleCreate(client, msg = {}) {
     this.leaveRoom(client, true);
     if (this.rooms.size >= MAX_ROOMS) { client.sendError('SERVER_FULL', '房间数已达上限，请稍后再试。'); return; }
     let id;
     do { id = String(crypto.randomInt(100000, 999999)); } while (this.rooms.has(id));
-    const room = new Room(id);
+    const game = msg.game === 'fight' ? 'fight' : 'turn';
+    const isPublic = msg.isPublic !== false;
+    const title = typeof msg.title === 'string' && msg.title.trim()
+      ? msg.title.trim().slice(0, 20)
+      : (typeof msg.name === 'string' && msg.name.trim() ? msg.name.trim().slice(0, 20) : (game === 'fight' ? '格斗擂台' : '回合对战'));
+    const mode = typeof msg.mode === 'string' ? msg.mode : '1v1';
+    const room = new Room(id, { game, isPublic, title, mode });
     room.clients[0] = client; room.token0 = client.token; client.room = room; client.side = 0;
     this.rooms.set(id, room);
-    client.send({ type: 'created', code: id, side: 0, token: client.token, protocol: PROTOCOL_VERSION });
+    client.send({
+      type: 'created',
+      code: id,
+      side: 0,
+      token: client.token,
+      protocol: PROTOCOL_VERSION,
+      game: room.game,
+      isPublic: room.isPublic,
+      title: room.title,
+      mode: room.mode
+    });
   }
 
   handleJoin(client, msg) {
@@ -188,11 +250,30 @@ class RoomServer {
     if (client.room === room) { client.sendError('ALREADY_IN_ROOM', '你已在这个房间里。'); return; }
     if (client.room) this.leaveRoom(client, true);
     room.clients[1] = client; room.token1 = client.token; client.room = room; client.side = 1;
+    if (room.game === 'fight' && room.phase === 'waiting') room.phase = 'select';
     // host may have gone silent (waiting phase, grace running): cancel grace
     this.clearGrace(room, 0);
     room.touch();
-    client.send({ type: 'joined', code: room.id, side: 1, token: client.token, protocol: PROTOCOL_VERSION });
-    room.clients[0]?.send({ type: 'opponent_joined', name: client.name });
+    client.send({
+      type: 'joined',
+      code: room.id,
+      side: 1,
+      token: client.token,
+      protocol: PROTOCOL_VERSION,
+      game: room.game,
+      isPublic: room.isPublic,
+      title: room.title,
+      mode: room.mode,
+      hostName: room.clients[0]?.name || '房主',
+      fightChars: room.fightChars,
+      fightLocked: room.fightLocked
+    });
+    room.clients[0]?.send({
+      type: 'opponent_joined',
+      name: client.name,
+      side: 1,
+      game: room.game
+    });
   }
 
   handleLock(client, msg) {
@@ -299,24 +380,170 @@ class RoomServer {
     }
   }
 
+  /* --- fight mode handlers --- */
+
+  handleFightSelect(client, msg) {
+    const room = client.room;
+    if (!room || room.game !== 'fight' || (room.phase !== 'waiting' && room.phase !== 'select')) return;
+    const charId = Number(msg.charId);
+    if (!Number.isInteger(charId) || charId < 0) return;
+    room.fightChars[client.side] = charId;
+    room.broadcast({ type: 'fight_opponent_select', side: client.side, charId }, client.id);
+  }
+
+  handleFightStage(client, msg) {
+    const room = client.room;
+    if (!room || room.game !== 'fight' || client.side !== 0) return;
+    if (typeof msg.stage === 'string') room.fightStage = msg.stage;
+  }
+
+  handleFightLock(client, msg) {
+    const room = client.room;
+    if (!room || room.game !== 'fight' || (room.phase !== 'waiting' && room.phase !== 'select')) return;
+    const locked = !!msg.locked;
+    if (client.side === 0 && typeof msg.stage === 'string') {
+      room.fightStage = msg.stage;
+    }
+    room.fightLocked[client.side] = locked;
+    room.broadcast({ type: 'fight_opponent_lock', side: client.side, locked }, client.id);
+    client.send({ type: 'fight_lock_ack', locked, side: client.side });
+    if (room.fightLocked[0] && room.fightLocked[1]) {
+      room.broadcast({ type: 'fight_both_locked' });
+      this.startFightBattle(room);
+    }
+  }
+
+  startFightBattle(room, customStage, customSeed) {
+    if (room.phase === 'battle') return;
+    room.phase = 'battle';
+    room.seed = (typeof customSeed === 'number' ? customSeed : (crypto.randomInt(1, 0xffffffff) >>> 0));
+    let stage = customStage || room.fightStage || 'streamroof';
+    if (stage === 'random') {
+      const stagePool = ['streamroof', 'sunset-deck', 'neon-alley', 'cyber-grid', 'retro-arcade', 'temple-grounds', 'digital-dojo'];
+      stage = stagePool[crypto.randomInt(0, stagePool.length)] || 'streamroof';
+    }
+    room.rematch = [false, false];
+    room.broadcast({
+      type: 'fight_start',
+      seed: room.seed,
+      stage,
+      chars: room.fightChars
+    });
+  }
+
+  handleFightStart(client, msg) {
+    const room = client.room;
+    if (!room || room.game !== 'fight') return;
+    if (client.side !== 0) { client.sendError('NOT_HOST', '仅房主可发起开战。'); return; }
+    if (!room.full()) { client.sendError('NOT_FULL', '等待挑战者加入。'); return; }
+    if (!room.fightLocked[0] || !room.fightLocked[1]) {
+      client.sendError('NOT_LOCKED', '双方尚未全部锁定角色。');
+      return;
+    }
+    this.startFightBattle(room, msg.stage, msg.seed);
+  }
+
+  handleFightInput(client, msg) {
+    const room = client.room;
+    if (!room || room.game !== 'fight' || room.phase !== 'battle') return;
+    const mask = Number(msg.mask) | 0;
+    const tick = Number(msg.tick) | 0;
+    room.broadcast({
+      type: 'fight_remote_input',
+      side: client.side,
+      mask,
+      tick
+    }, client.id);
+  }
+
+  handleFightSync(client, msg) {
+    const room = client.room;
+    if (!room || room.game !== 'fight' || room.phase !== 'battle') return;
+    if (client.side !== 0) return;
+    room.broadcast({
+      type: 'fight_sync',
+      hp0: msg.hp0,
+      hp1: msg.hp1,
+      mp0: msg.mp0,
+      mp1: msg.mp1,
+      guard0: msg.guard0,
+      guard1: msg.guard1,
+      timer: msg.timer,
+      round: msg.round,
+      wins: msg.wins
+    }, client.id);
+  }
+
+  handleFightEnd(client, msg) {
+    const room = client.room;
+    if (!room || room.game !== 'fight' || room.phase !== 'battle') return;
+    room.phase = 'finished';
+    room.rematch = [false, false];
+    console.log(`[FIGHT END] room=${room.id} side=${client.side} winner=${msg.winner}`);
+    room.broadcast({ type: 'fight_result', winner: msg.winner });
+  }
+
+  handleFightReselect(client) {
+    const room = client.room;
+    if (!room || room.game !== 'fight') return;
+    room.phase = 'select';
+    room.fightLocked = [false, false];
+    room.rematch = [false, false];
+    room.broadcast({ type: 'rematch', game: 'fight' });
+  }
+
+  handleFightRematch(client) {
+    const room = client.room;
+    if (!room || room.game !== 'fight') return;
+    room.rematch[client.side] = true;
+    room.broadcast({ type: 'rematch_ready', side: client.side }, client.id);
+    if (room.rematch[0] && room.rematch[1]) {
+      room.phase = 'select';
+      room.fightLocked = [false, false];
+      room.rematch = [false, false];
+      room.broadcast({ type: 'rematch', game: 'fight' });
+    }
+  }
+
   leaveRoom(client, explicit) {
     const room = client.room;
     if (!room) return;
     client.room = null;
     const side = client.side;
     room.clients[side] = null;
+    if (room.graceTimer[side]) this.clearGrace(room, side);
+    client.side = null;
+
     const other = room.clients[side ^ 1];
-    if (!other) { this.destroyRoom(room); return; }
-    if (room.phase === 'battle') {
-      // grace window: opponent is told, disconnecter may reconnect
+    if (!other) {
+      this.destroyRoom(room);
+      return;
+    }
+
+    if (!explicit && room.phase === 'battle') {
+      // Unexpected drop during active battle -> allow reconnect grace
       room.disconnectedAt[side] = Date.now();
       other.send({ type: 'opponent_left', graceMs: GRACE_MS });
       this.armGrace(room, side);
-    } else { // waiting / select / finished: no live game to protect
+      return;
+    }
+
+    // Explicit leave, or leave during waiting/select/finished
+    if (side === 0) {
+      // Host left -> Close room for remaining guest
       other.send({ type: 'opponent_left' });
       this.destroyRoom(room);
+    } else {
+      // Guest (side 1) left -> Host stays in room, reset room to waiting
+      room.phase = 'waiting';
+      room.fightLocked = [false, false];
+      room.rematch = [false, false];
+      room.teams = [null, null];
+      room.fightChars[1] = null;
+      room.battle = null;
+      room.actionLog = [];
+      other.send({ type: 'opponent_left' });
     }
-    client.side = null;
   }
 
   armGrace(room, side) {
@@ -368,7 +595,23 @@ class RoomServer {
   }
 
   roomState(room, side) {
-    const base = { type: 'room_state', phase: room.phase, code: room.id, side, protocol: PROTOCOL_VERSION };
+    const base = {
+      type: 'room_state',
+      phase: room.phase,
+      code: room.id,
+      side,
+      protocol: PROTOCOL_VERSION,
+      game: room.game,
+      isPublic: room.isPublic,
+      title: room.title,
+      mode: room.mode
+    };
+    if (room.game === 'fight') {
+      base.fightChars = room.fightChars;
+      base.fightLocked = room.fightLocked;
+      base.seed = room.seed;
+      return base;
+    }
     if (room.phase === 'select' || room.phase === 'finished') {
       base.locked = [!!room.teams[0], !!room.teams[1]];
       if (room.phase === 'finished' && room.battle) {
@@ -402,7 +645,8 @@ class RoomServer {
   /* test hooks */
   snapshotForTest() {
     return [...this.rooms.values()].map(r => ({
-      id: r.id, phase: r.phase, sides: r.clients.map(c => !!c),
+      id: r.id, game: r.game, phase: r.phase, isPublic: r.isPublic, title: r.title,
+      sides: r.clients.map(c => !!c),
       actionCount: r.actionLog.length, winner: r.battle?.winner ?? null,
     }));
   }
