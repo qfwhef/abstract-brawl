@@ -32,7 +32,7 @@ class Art{
  async skill(s,origin){if(origin!=null)await this.character(TURN_BY_ID.get(origin),true);if(s?.source?.summonId!=null)await this.character(TURN_BY_ID.get(s.source.summonId),true);if(s)await MemeVisuals.load(url=>this.image(url),[{skills:[s.source]}],true);}
 }
 class Renderer{
- constructor(canvas,art){this.canvas=canvas;this.ctx=canvas.getContext('2d');this.art=art;this.battle=null;this.background=null;this.time=0;this.playing=null;this.paused=false;this.speed=1;this.last=0;this.targets=[];this.target=null;this.raf=requestAnimationFrame(t=>this.frame(t));}
+ constructor(canvas,art){this.canvas=canvas;this.ctx=canvas.getContext('2d');this.art=art;this.battle=null;this.background=null;this.time=0;this.playing=null;this.paused=false;this.speed=1;this.last=0;this.targets=[];this.target=null;this.mySide=0;this.raf=requestAnimationFrame(t=>this.frame(t));}
  layout(){
   const portrait=typeof matchMedia==='function'&&matchMedia('(max-width:700px) and (orientation:portrait)').matches;
   const width=portrait?740:1100,cw=this.canvas.clientWidth,ch=this.canvas.clientHeight,height=portrait&&cw>0&&ch>0?Math.round(width*ch/cw):portrait?790:680;
@@ -41,7 +41,7 @@ class Renderer{
  static fieldLayout(width,height,portrait=false){const rowHeight=(height-(height>=750?100:30))/2,scale=Math.max(.22,Math.min(portrait?.82:.85,(rowHeight-103)/173));return {width,height,scale,front:portrait?286:405,back:portrait?96:164,top:rowHeight-30,gap:rowHeight};}
  position(u){const l=this.layout(),x=u.cell>=2?l.back:l.front;return {x:u.side?l.width-x:x,y:l.top+(u.cell%2)*l.gap};}
  hitTest(x,y,legal=this.targets){const l=this.layout();return [...(this.battle?.units||[])].filter(u=>u.hp>0&&legal.includes(u.uid)).sort((a,b)=>this.position(b).y-this.position(a).y).find(u=>{const p=this.position(u);return x>=p.x-77&&x<=p.x+77&&y>=p.y-205*l.scale-25&&y<=p.y+48;})?.uid??null;}
- setBattle(b,image){this.battle=b;this.background=image;this.playing=null;this.time=0;this.targets=[];this.target=null;}
+ setBattle(b,image,mySide=0,roomCode=null){this.battle=b;this.background=image;this.playing=null;this.time=0;this.targets=[];this.target=null;this.mySide=mySide;this.roomCode=roomCode;}
  play(action,before){return new Promise((resolve,reject)=>{this.playing={action,before,t:0,duration:action.guard?.7:1.5,resolve,reject,sounded:false};});}
  cancel(){const pending=this.playing;this.playing=null;pending?.resolve(false);this.battle=null;}
  frame(now){const dt=Math.min(.05,(now-this.last)/1000);this.last=now;if(!document.hidden&&!this.paused){this.time+=dt;if(this.playing){this.playing.t+=dt*this.speed;if(!this.playing.sounded&&this.playing.t>=this.playing.duration*.48){this.playing.sounded=true;this.onImpact?.(this.playing.action);}if(this.playing.t>=this.playing.duration){const p=this.playing;this.playing=null;p.resolve(true);}}}if(this.battle&&!document.hidden){try{this.draw();}catch(e){const p=this.playing;this.playing=null;if(p)p.reject(e);else{this.paused=true;this.onError?.(e);}}}this.raf=requestAnimationFrame(t=>this.frame(t));}
@@ -57,8 +57,8 @@ class Renderer{
   c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,w,h);c.imageSmoothingEnabled=false;
   if(this.background){const iw=this.background.naturalWidth||this.background.width||w,ih=this.background.naturalHeight||this.background.height||h,k=Math.max(w/iw,h/ih);c.drawImage(this.background,(w-iw*k)/2,(h-ih*k)/2,iw*k,ih*k);}
   c.fillStyle='#10132266';c.fillRect(0,0,w,h);if(h>=750){c.fillStyle='#0c0f18aa';c.fillRect(0,h-31,w,31);}
-  if(h>=750){c.font='bold 22px Microsoft YaHei';c.textAlign='left';c.fillStyle='#76e7ff';c.fillText('我方小队',24,38);c.textAlign='right';c.fillStyle='#ff92ac';c.fillText('对手小队',w-24,38);c.textAlign='center';c.fillStyle='#ffe2ad';c.fillText('第 '+b.round+' / 24 轮',w/2,38);}
-  for(const side of [0,1])for(let cell=0;cell<4;cell++){const p=this.position({side,cell});c.fillStyle=side?'#a8426b25':'#47b8c42b';c.strokeStyle=side?'#f59aaa55':'#91edff55';c.lineWidth=1;c.beginPath();c.ellipse(p.x,p.y+4,75,22,0,0,Math.PI*2);c.fill();c.stroke();}
+  if(h>=750){const leftMine=(this.mySide??0)===0;c.font='bold 22px Microsoft YaHei';c.textAlign='left';c.fillStyle=leftMine?'#76e7ff':'#ff92ac';c.fillText(leftMine?'我方小队':'对手小队',24,38);c.textAlign='right';c.fillStyle=leftMine?'#ff92ac':'#76e7ff';c.fillText(leftMine?'对手小队':'我方小队',w-24,38);c.textAlign='center';c.fillStyle='#ffe2ad';c.fillText('第 '+b.round+' / 24 轮'+(this.roomCode?' · 房号 '+this.roomCode:''),w/2,38);}else if(this.roomCode){c.font='bold 14px Microsoft YaHei';c.textAlign='center';c.fillStyle='#ffe2adaa';c.fillText('房号 '+this.roomCode,w/2,18);}
+  for(const side of [0,1])for(let cell=0;cell<4;cell++){const p=this.position({side,cell}),isAlly=side===(this.mySide??0);c.fillStyle=isAlly?'#47b8c42b':'#a8426b25';c.strokeStyle=isAlly?'#91edff55':'#f59aaa55';c.lineWidth=1;c.beginPath();c.ellipse(p.x,p.y+4,75,22,0,0,Math.PI*2);c.fill();c.stroke();}
   const action=this.playing,progress=action?action.t/action.duration:0;
   for(const u of [...b.units].sort((a,z)=>this.position(a).y-this.position(z).y)){
    const home=this.position(u),head=173*l.scale+34;let p={...home};if(action?.action.actor===u.uid&&action.action.skill?.melee){const target=b.unit(action.action.targets[0]);if(target){const dest=this.position(target),travel=progress<.36?progress/.36:progress>.75?(1-progress)/.25:1;p.x+=(dest.x+(u.side?85:-85)-p.x)*Math.max(0,travel);p.y+=(dest.y-p.y)*Math.max(0,travel);}}
@@ -66,7 +66,7 @@ class Renderer{
    if(u.hp>0&&(active||selected||legal)){c.strokeStyle=selected?'#ffd278':active?'#87efff':'#ffffff88';c.lineWidth=selected||active?4:2;c.beginPath();c.ellipse(home.x,home.y+4,77,23,0,0,Math.PI*2);c.stroke();}
    const actor=this.actor(u);c.save();try{c.translate(p.x,p.y);c.scale(l.scale,l.scale);if(!MemeVisuals.form({ctx:c,options:this.art},actor,actor.hp<=0?.38:1,0,0))FighterAnimation.drawCharacter(c,actor,this.art,actor.hp<=0?.38:1,0,0);}finally{c.restore();}
    c.textAlign='center';c.font='bold 21px Microsoft YaHei';c.fillStyle=selected?'#ffd278':u.hp>0?'#fff6e8':'#9396a0';c.shadowColor='#000';c.shadowBlur=5;c.fillText((selected?'▼ ':'')+u.data.name,home.x,home.y-head);c.shadowBlur=0;
-   c.fillStyle='#111622';c.fillRect(home.x-63,home.y+16,126,10);c.fillStyle=u.side?'#f18da5':'#78dfea';c.fillRect(home.x-63,home.y+16,126*u.hp/u.maxHp,10);if(u.shield){c.fillStyle='#ddd4b9';c.fillRect(home.x-63,home.y+28,126*Math.min(1,u.shield/u.maxHp),3);}
+   c.fillStyle='#111622';c.fillRect(home.x-63,home.y+16,126,10);c.fillStyle=u.side===(this.mySide??0)?'#78dfea':'#f18da5';c.fillRect(home.x-63,home.y+16,126*u.hp/u.maxHp,10);if(u.shield){c.fillStyle='#ddd4b9';c.fillRect(home.x-63,home.y+28,126*Math.min(1,u.shield/u.maxHp),3);}
    c.font='16px Microsoft YaHei';c.fillStyle='#ecdfc6';c.fillText(u.hp<=0?'退场':`${Math.ceil(u.hp)}/${u.maxHp} · ${u.energy}能`,home.x,home.y+43);
    if(u.hp>0){for(let n=0;n<u.maxGuard;n++){c.fillStyle=n<u.guard?'#fbd593':'#45404c';c.fillRect(home.x-u.maxGuard*6+n*12,home.y-head+12,9,6);}c.fillStyle=u.broken?'#ffdc74':'#e1d6be';c.font='16px Microsoft YaHei';const flags=u.broken?'击破！':u.breakSafe?'击破保护':u.data.weak.map(x=>'弱'+x).join(' ');c.fillText(flags,home.x,home.y-head+33);if(h>=750&&Object.keys(u.status).length){c.fillStyle='#bdecca';c.fillText(Object.keys(u.status).map(x=>({burn:'烧',slow:'缓',expose:'脆',weaken:'弱',attack:'攻↑',haste:'速↑',defend:'防',counter:'反',regen:'愈'}[x]||'')).join(' '),home.x,home.y+63);}}
   }

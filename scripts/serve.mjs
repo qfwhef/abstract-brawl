@@ -20,5 +20,10 @@ const server = http.createServer((req, res) => {
     if (req.method === 'HEAD') res.end(); else fs.createReadStream(real).pipe(res);
   } catch { res.writeHead(404); res.end('Not found'); }
 });
+try {
+  const { attach } = await import('../server/net-server.mjs');
+  attach(server);
+} catch {}
 server.on('error', err => { console.error(err.message); process.exitCode = 1; });
-server.listen(port, '127.0.0.1', () => console.log(`抽象大乱斗：http://127.0.0.1:${port}/`));
+server.listen(port, '127.0.0.1', () => console.log(`抽象大乱斗（含 /ws 联机服务）：http://127.0.0.1:${port}/`));
+

@@ -39,7 +39,7 @@ class Battle{
  startRound(){
   this.round++;if(this.round>24){const hp=side=>this.units.filter(u=>u.side===side).reduce((s,u)=>s+u.hp,0)/this.units.filter(u=>u.side===side).reduce((s,u)=>s+u.maxHp,0);const d=hp(0)-hp(1);this.winner=Math.abs(d)<.00001?-1:d>0?0:1;this.active=null;this.emit('end',{winner:this.winner,timeout:true});return;}
   if(this.round>1)for(const side of [0,1]){const n=this.bonds[side]['支援']||0;if(n)this.living(side).forEach(u=>this.heal(u,Math.round(u.maxHp*.03*n)));}
-  const order=this.living().map(u=>({u,tie:this.random()}));order.sort((a,b)=>(b.u.speed*(b.u.status.haste?1.22:1)*(b.u.status.slow?.8:1))-(a.u.speed*(a.u.status.haste?1.22:1)*(a.u.status.slow?.8:1))||a.tie-b.tie);this.queue=order.map(x=>x.u.uid);this.emit('round',{number:this.round});
+  const order=this.living().map(u=>({u,tie:this.random()}));order.sort((a,b)=>(b.u.speed*(b.u.status.haste?1.22:1)*(b.u.status.slow?.8:1))-(a.u.speed*(a.u.status.haste?1.22:1)*(a.u.status.slow?.8:1))||a.tie-b.tie||a.u.uid-b.u.uid);this.queue=order.map(x=>x.u.uid);this.emit('round',{number:this.round});
  }
  next(){
   if(this.winner!==null)return;this.active=null;
@@ -89,12 +89,12 @@ class Battle{
   t.guard=Math.max(0,t.guard-n);if(t.guard===0){t.broken=1;this.energy(u,12+(u.data.role==='控场'?15:0));this.emit('break',{uid:t.uid,by:u.uid});const bo=u.side===0?(this.options.boons||{}):{};if(bo.break)this.living(u.side).forEach(a=>this.energy(a,7*bo.break));}
  }
  move(cell){const u=this.unit(this.active);if(!u||u.moved||!Number.isInteger(cell)||cell<0||cell>3||cell===u.cell)return false;const distance=Math.abs(cell%2-u.cell%2)+Math.abs(Math.floor(cell/2)-Math.floor(u.cell/2));if(distance!==1)return false;const other=this.living(u.side).find(t=>t.cell===cell);if(other)other.cell=u.cell;const from=u.cell;u.cell=cell;u.moved=true;this.emit('move',{uid:u.uid,from,cell,swap:other?.uid});return true;}
- act(slot,targetId){
+ act(slot,targetId,forcedOriginId){
   const u=this.unit(this.active);if(!u||this.winner!==null)return {ok:false,reason:'当前没有可行动角色'};
   if(slot==='guard'){this.status(u,'defend',2);this.energy(u,26);u.guard=Math.min(u.maxGuard,u.guard+1);this.lastAction={actor:u.uid,guard:true,targets:[u.uid]};this.emit('action',{uid:u.uid,name:'防御蓄能',targets:[u.uid]});this.next();return {ok:true,...this.lastAction};}
   const original=u.data.skills[slot];if(!original||!this.canUse(u,slot))return {ok:false,reason:'能量不足'};
   let s=original,origin=null,target=this.unit(targetId);
-  if(original.mimic){const pool=this.catalog.filter(c=>c.id!==u.data.id&&!c.skills[slot].mimic);origin=pool[Math.floor(this.random()*pool.length)];s={...origin.skills[slot],cost:original.cost,slot};const legal=this.targets(u,s);target=legal.find(t=>t.uid===targetId)||legal[Math.floor(this.random()*legal.length)];}
+  if(original.mimic){const pool=this.catalog.filter(c=>c.id!==u.data.id&&!c.skills[slot].mimic);const pick=pool[Math.floor(this.random()*pool.length)];origin=(forcedOriginId!=null&&pool.some(c=>c.id===forcedOriginId))?pool.find(c=>c.id===forcedOriginId):pick;s={...origin.skills[slot],cost:original.cost,slot};const legal=this.targets(u,s);target=legal.find(t=>t.uid===targetId)||legal[Math.floor(this.random()*legal.length)];}
   if(!target||!this.targets(u,s).some(t=>t.uid===target.uid))return {ok:false,reason:'请选择有效目标'};
   const targets=this.area(u,s,target);this.energy(u,-this.cost(u,original));this._capture=[];
   this.lastAction={actor:u.uid,slot,skill:s,origin:origin?.id,targets:targets.map(t=>t.uid)};this.emit('action',{uid:u.uid,name:s.name,targets:targets.map(t=>t.uid),mimic:!!origin});
@@ -125,7 +125,7 @@ class Battle{
     if(s.grantEnergy)score+=Math.min(100-a.energy,s.grantEnergy)*2;if(s.cleanse)score+=Object.keys(a.status).filter(k=>['burn','slow','expose','weaken'].includes(k)).length*30;
    }
    if(s.form&&!u.form)score+=85;if(s.selfHeal)score+=Math.min(u.maxHp-u.hp,u.maxHp*s.selfHeal);if(s.mimic)score+=slot===3?280:115;
-   score-=this.cost(u,s)*.55;if(slot===0)score+=20+(u.energy>=55?28:0);if(level===0)score=score*.4+this.random()*140;else if(level===1)score+=this.random()*25;
+   score-=this.cost(u,s)*.55;if(slot===0)score+=20+(u.energy>=55?28:0);const jitter=(((Math.sin((this.turn+1)*997+slot*31+(t.uid+1)*17)*43758.5453)%1)+1)%1;if(level===0)score=score*.4+jitter*140;else if(level===1)score+=jitter*25;
    candidates.push({slot,target:t.uid,score});
   }}
   if(u.energy<85)candidates.push({slot:'guard',score:(u.hp<u.maxHp*.3?95:40)+(u.energy<25?35:0)});
